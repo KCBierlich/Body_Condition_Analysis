@@ -137,7 +137,7 @@ the following:
 
 ## Data
 
-Data located in 1\_uncertainty\_model \> data
+Data located in data folder
 
 *calibration\_object-measurements.csv* - training/calibration data for
 the LemHex-44 and FreeFly Alta 6.  
@@ -224,13 +224,13 @@ a ‘reports’ folder.
       - “length\_samples\_mns.rds” contains the posterior predictive
         measurement distributions for TL and widths and is used to
         calculate body condition in the
-        “2\_calculating\_body\_condition” folder.
+        “calculating\_body\_condition” folder.
   - The ‘reports’ folder contains .html files to evaluate the results
     from the model
-      - See “posterior\_diagnostics\_mns.html” for a summary of model
-        output for each measurement
+      - For example, see “posterior\_diagnostics\_mns.html” for a summary of model
+        outputs for each measurement
 
-After model is finished running, proceed to 2\_calculate\_body condition
+After model is finished running, proceed to calculate\_body condition
 
 # 2\. Calculating body condition
 
