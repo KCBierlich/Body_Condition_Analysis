@@ -1,0 +1,682 @@
+---
+title: "body_condition_analysis"
+author: "KCB"
+date: "7/29/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Comparing 1D, 2D, and 3D body condition measurements {.tabset}
+This R markdown re-runs the analysis and creates the figures in the manuscript.   
+
+```{r packages, include = FALSE}
+library(ggplot2)
+library(conflicted)
+library(dotenv)
+library(drake)
+library(dplyr)
+library(tidyr)
+library(ggpubr)
+library(coda)
+library(ggridges) # ridgeplots
+library(ggdist) # Using TidyBayes
+library(corrplot) # Correlation Matrix
+library(conflicted) 
+conflict_prefer("lag", "dplyr") 
+conflict_prefer("select", "dplyr")
+conflict_prefer("mutate", "dplyr") 
+conflict_prefer("summarise", "dplyr") 
+conflict_prefer("summarize", "dplyr") 
+```
+
+
+## Import / prep data 
+```{r}
+# load each animal's dataframe, posterior distribution (the mcmc iterations)
+indv_df <- readRDS(file.path("..","calculate_body_condition", "outputs", "collated_allMC.rds"))
+
+
+# CollatriX summary sheet with the mean and 95% HPD intervals for the posterior predictive distribution of each body condition metric for each individual
+df.summary <- read.csv(file.path("..","calculate_body_condition", "outputs", "collated_MC_summarystats.csv"))
+
+# Import model input measurement data
+indv_meta <- read.csv(file.path("..","data","measurement_inputs.csv"))
+  # keep unique metadata per AID
+  indv_meta <- indv_meta %>% group_by(AID) %>% dplyr::filter(row_number(AID) == 1)
+  
+# Merge CollatriX summary df w/ the metadata associated w/ each image and AID from the input measurements.
+df.summary_meta <- df.summary %>% left_join(indv_meta, by = "AID") %>% 
+  select(AID, Species, Image, TL, TL.05.00..Width, TL.10.00..Width, TL.15.00..Width, TL.20.00..Width, 
+  TL.25.00..Width, TL.30.00..Width, TL.35.00..Width, TL.40.00..Width, TL.45.00..Width, TL.50.00..Width,
+  TL.55.00..Width, TL.60.00..Width, TL.65.00..Width, TL.70.00..Width, TL.75.00..Width, TL.80.00..Width,
+  TL.85.00..Width, TL.90.00..Width, TL.95.00..Width, HTRange, SW, BaroAlt, Launch_Ht, LaserAlt, Altitude, 
+  Focal_Length, Iw, Sw, date_source, Reproductive_Class, TL.mean, TL.lower, TL.upper, SW.mean, SW.lower, SW.upper, BAIpar.HT.mean,
+  BAIpar.HT.lower, BAIpar.HT.upper, SA.HT.mean, SA.HT.lower, SA.HT.upper, BV.HT.mean, BV.HT.lower, BV.HT.upper)
+# Note that 'TL' is the original/expected/empirical/pre-model length, where 'TL.mean' is the mean of the predicted posterior distribution from the model. Same for the widths.
+
+# add altimeter as a column
+bc_df <- rbind(df.summary_meta %>% dplyr::filter(!is.na(BaroAlt) & !is.na(LaserAlt)) %>% mutate(altimeter = "barometer & laser"),
+              df.summary_meta %>% dplyr::filter(is.na(BaroAlt)) %>% mutate(altimeter = "only laser"),
+              df.summary_meta %>% dplyr::filter(is.na(LaserAlt)) %>% mutate(altimeter = "only barometer"))
+
+# Quick summary
+table(bc_df$Species)
+table(bc_df$altimeter)
+```
+
+
+#### Pull SWs for each group in analysis
+CollatriX calculated SWstd, need to pull the mean of the SW posterior predictive measurements
+```{r}
+
+# Calculating SW for each species
+
+# combine the two full df lists
+mcmc_list <- c(indv_df)
+
+# save list of AIDs
+ID_list <- names(mcmc_list)  # extract AIDs
+full_df <- mcmc_list        # save individual's dataframes to be used in the loop for maturity
+           
+# make an empty dataframe to fill with the summary stats
+new_SW.df <- data.frame()
+
+# loop through list of AIDs (loop through each individual's data frame) and calculate the proportion of TLs > 11.2. 
+# result has a column of 'perAdult' for percent likelihood of being an adult.
+for (x in 1:length(ID_list)){
+  xx <- ID_list[x] #pull ID name from list
+  AID <- xx #save ID as variable
+  TL <- mean(full_df[[xx]]$"TL")
+
+  # for blues
+  sw55 <- mean(full_df[[xx]]$"TL.55.00..Width")
+  sw55_lwr <- HPDinterval(mcmc(full_df[[xx]]$"TL.55.00..Width"))[1]
+  sw55_upr <- HPDinterval(mcmc(full_df[[xx]]$"TL.55.00..Width"))[2]
+  sw55_std <- mean(full_df[[xx]]$"TL.55.00..Width"/full_df[[xx]]$"TL")
+  sw55_std_lwr <- HPDinterval(mcmc(full_df[[xx]]$"TL.55.00..Width"/full_df[[xx]]$"TL"))[1]
+  sw55_std_upr <- HPDinterval(mcmc(full_df[[xx]]$"TL.55.00..Width"/full_df[[xx]]$"TL"))[2]
+  
+  # for minkes
+  sw40 <- mean(full_df[[xx]]$"TL.40.00..Width")
+  sw40_lwr <- HPDinterval(mcmc(full_df[[xx]]$"TL.40.00..Width"))[1]
+  sw40_upr <- HPDinterval(mcmc(full_df[[xx]]$"TL.40.00..Width"))[2]
+  sw40_std <- mean(full_df[[xx]]$"TL.40.00..Width"/full_df[[xx]]$"TL")
+  sw40_std_lwr <- HPDinterval(mcmc(full_df[[xx]]$"TL.40.00..Width"/full_df[[xx]]$"TL"))[1]
+  sw40_std_upr <- HPDinterval(mcmc(full_df[[xx]]$"TL.40.00..Width"/full_df[[xx]]$"TL"))[2]
+  
+  
+  # for humpback calves
+  sw60 <- mean(full_df[[xx]]$"TL.60.00..Width")
+  sw60_lwr <- HPDinterval(mcmc(full_df[[xx]]$"TL.60.00..Width"))[1]
+  sw60_upr <- HPDinterval(mcmc(full_df[[xx]]$"TL.60.00..Width"))[2]
+  sw60_std <- mean(full_df[[xx]]$"TL.60.00..Width"/full_df[[xx]]$"TL")
+  sw60_std_lwr <- HPDinterval(mcmc(full_df[[xx]]$"TL.60.00..Width"/full_df[[xx]]$"TL"))[1]
+  sw60_std_upr <- HPDinterval(mcmc(full_df[[xx]]$"TL.60.00..Width"/full_df[[xx]]$"TL"))[2]
+  
+  # for humpback adults
+  sw50 <- mean(full_df[[xx]]$"TL.50.00..Width")
+  sw50_lwr <- HPDinterval(mcmc(full_df[[xx]]$"TL.50.00..Width"))[1]
+  sw50_upr <- HPDinterval(mcmc(full_df[[xx]]$"TL.50.00..Width"))[2]
+  sw50_std <- mean(full_df[[xx]]$"TL.50.00..Width"/full_df[[xx]]$"TL")
+  sw50_std_lwr <- HPDinterval(mcmc(full_df[[xx]]$"TL.50.00..Width"/full_df[[xx]]$"TL"))[1]
+  sw50_std_upr <- HPDinterval(mcmc(full_df[[xx]]$"TL.50.00..Width"/full_df[[xx]]$"TL"))[2]
+  
+  
+  # standard deviations of uncertainty
+  #{!} standard error or variance or deviation
+  TL.sd <- sd(full_df[[xx]]$TL)
+  BAI.sd <- sd(full_df[[xx]]$BAIpar_HT)
+  SA.sd <- sd(full_df[[xx]]$SA_HT)
+  BV.sd <- sd(full_df[[xx]]$BV_HT)
+  sw55.sd <- sd(full_df[[xx]]$"TL.55.00..Width")
+  sw40.sd <- sd(full_df[[xx]]$"TL.40.00..Width")
+  sw60.sd <- sd(full_df[[xx]]$"TL.60.00..Width")
+  sw50.sd <- sd(full_df[[xx]]$"TL.50.00..Width")
+  sw55std.sd <- sd(full_df[[xx]]$"TL.55.00..Width"/full_df[[xx]]$"TL")
+  sw40std.sd <- sd(full_df[[xx]]$"TL.40.00..Width"/full_df[[xx]]$"TL")
+  sw60std.sd <- sd(full_df[[xx]]$"TL.60.00..Width"/full_df[[xx]]$"TL")
+  sw50std.sd <- sd(full_df[[xx]]$"TL.50.00..Width"/full_df[[xx]]$"TL")
+  
+  # merge
+  tempdf <- data.frame(AID, TL,
+                       sw55, sw55_lwr, sw55_upr, sw55_std, sw55_std_lwr, sw55_std_upr,
+                       sw40, sw40_lwr, sw40_upr, sw40_std, sw40_std_lwr, sw40_std_upr,
+                       sw60, sw60_lwr, sw60_upr, sw60_std, sw60_std_lwr, sw60_std_upr,
+                       sw50, sw50_lwr, sw50_upr, sw50_std, sw50_std_lwr, sw50_std_upr,
+                       TL.sd, BAI.sd, SA.sd, BV.sd, sw55.sd, sw40.sd, sw60.sd, sw50.sd,
+                       sw55std.sd, sw40std.sd, sw60std.sd, sw50std.sd)
+  new_SW.df <- rbind(new_SW.df,tempdf) #add the row of summary stats for this individual to the main dataframe
+}
+
+new_SW.df
+```
+
+Now merge new SW w/ dataframe, and clean up
+```{r}
+
+bc_dat <- bc_df %>% left_join(new_SW.df %>% select(!c(TL)), by = "AID")
+bc_dat <- bc_dat %>% select(!"TL.95.00..Width")  # don't need this width
+
+
+# create a group to distinguish bluew, AMWs, humpbacks, and humpback calves
+bc_dat$group <- bc_dat$Species
+bc_dat$group <- ordered(bc_dat$group, levels = c("AMW", "Blue", "Humpback", "Humpback calf"))
+bc_dat$group[bc_dat$Reproductive_Class == "calf"]  <- 'Humpback calf'
+
+
+# Consistently color by species 
+specColors <- setNames(c("aquamarine3", "steelblue", "coral3", "coral"), names(bc_dat$group))
+
+
+# now need to add the standardized SW for each species 
+std_SW <- rbind(bc_dat %>% 
+                  dplyr::filter(Species == "Humpback" & Reproductive_Class != "calf") %>% 
+                  mutate(SW = sw50, SW_lwr = sw50_lwr, SW_upr = sw50_upr, 
+                         SW_std = sw50_std,SW_std_lwr = sw50_std_lwr, 
+                         SW_std_upr = sw50_std_upr, SW_sd = sw50.sd, SW_std_sd = sw50std.sd) %>% 
+                  select(AID, SW, SW_lwr, SW_upr, SW_sd, SW_std, SW_std_lwr, SW_std_upr, SW_std_sd),
+                
+                
+                bc_dat %>% 
+                  dplyr::filter(group == "Humpback calf") %>% 
+                  mutate(SW = sw60, SW_lwr = sw60_lwr, SW_upr = sw60_upr, 
+                         SW_std = sw60_std,SW_std_lwr = sw60_std_lwr, 
+                         SW_std_upr = sw60_std_upr, SW_sd = sw60.sd, SW_std_sd = sw60std.sd) %>% 
+                  select(AID, SW, SW_lwr, SW_upr, SW_sd, SW_std, SW_std_lwr, SW_std_upr, SW_std_sd),
+      
+                
+                bc_dat %>% 
+                  dplyr::filter(Species == "Blue") %>% 
+                  mutate(SW = sw55, SW_lwr = sw55_lwr, SW_upr = sw55_upr, 
+                         SW_std = sw55_std, SW_std_lwr = sw55_std_lwr, 
+                         SW_std_upr = sw55_std_upr, SW_sd = sw55.sd, SW_std_sd = sw55std.sd) %>% 
+                  select(AID, SW, SW_lwr, SW_upr, SW_sd, SW_std, SW_std_lwr, SW_std_upr, SW_std_sd),
+                
+                
+                bc_dat %>% 
+                  dplyr::filter(Species == "AMW") %>% 
+                  mutate(SW = sw40, SW_lwr = sw40_lwr, SW_upr = sw40_upr, 
+                         SW_std = sw40_std, SW_std_lwr = sw40_std_lwr, 
+                         SW_std_upr = sw40_std_upr, SW_sd  = sw40.sd, SW_std_sd = sw40std.sd) %>% 
+                  select(AID, SW, SW_lwr, SW_upr, SW_sd, SW_std, SW_std_lwr, SW_std_upr, SW_std_sd)
+      )
+
+bc_dat <- bc_dat %>% left_join(std_SW, by = "AID")
+names(bc_dat)[names(bc_dat) == "SW.x"] <- "SingleWidth"
+names(bc_dat)[names(bc_dat) == "SW.y"] <- "SW"
+
+# confirm proper grouping
+table(bc_dat$group)
+```
+
+
+
+## Analysis {.tabset}
+
+1. Compare Body Shapes  
+2. How does error scale from 1D to 2D to 3D?  
+3. Compare Unstd metrics  
+4. Compare std metrics  
+5. How are they correlated?  
+6. Which is most precise to itself  
+7. Altimeter differences?  
+
+
+### Body Shapes
+Figure 2  
+Compare Body shapes betweeen blues, AMWs, humpbacks, and humpback calves
+```{r}
+# Arrange table
+rename.widths <-  c("5%","10%", "15%", "20%", "25%", "30%", "35%", "40%", "45%", "50%", "55%","60%","65%", "70%", "75%", "80%", "85%", "90%")
+
+names(bc_dat)[5:22] <- rename.widths
+
+
+sp.widths <- bc_dat %>% select(names(bc_dat)[5:22],'AID','TL','Image', 'group') %>% 
+  pivot_longer(., cols = names(bc_dat)[5:22], names_to = "Var", values_to = "Val") 
+
+sp.widths$WidRatio <- sp.widths$Val/sp.widths$TL
+sp.widths$group <- as.factor(sp.widths$group)
+
+#
+# Create Body Shape Plot 
+#
+
+# Absolute widths (m)
+widths_abs <- ggplot(aes(x=Var, y = Val, color = group), data=sp.widths) +
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme(legend.position = "none") + 
+  scale_x_discrete(name ="width % of TL", limits=rename.widths) +
+  facet_wrap(~group) +
+  ylab("Width  (m)") + scale_colour_manual(values = specColors)
+
+# Relative widths (standardized Width Ratio)
+widths_rel <- ggplot(aes(x=Var, y = WidRatio, color = group), data=sp.widths) +
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+  theme(legend.position = "none") + 
+  scale_x_discrete(name ="width % of TL", limits=rename.widths) +
+  facet_wrap(~group) +
+  ylab("Standardized Width") + scale_colour_manual(values = specColors)
+
+ggarrange(widths_abs,widths_rel, ncol = 1, labels = 'AUTO')
+ggsave("figures/Fig2_body_shapes.jpg", width = 180, units = "mm")    
+ggsave("figures/Fig2_body_shapes.tiff", width = 180, units = "mm")
+```
+
+
+### Ridgleplot of posterior widths
+Used for Figure 1B
+```{r}
+# pull example AID
+id <- indv_df$`BW180829-30`
+names(id)[3:20] <- c("5%", "10%", "15%","20%", "25%", "30%", "35%", "40%", "45%", "50%", 
+                     "55%", "60%", "65%", "70%", "75%", "80%", "85%", "90%")
+
+id <- id %>% select(names(id)[3:20]) %>% 
+  pivot_longer(., cols = names(id)[3:20], names_to = "width_name", values_to = "width") 
+id$width_name <- ordered(as.factor(id$width_name), c("90%", "85%","80%","75%","70%","65%","60%","55%","50%","45%",
+                                                     "40%","35%","30%","25%","20%","15%", "10%","5%"))
+
+
+ggplot(data = id, aes(x = width, y = width_name)) + 
+  geom_density_ridges(color = "steelblue", fill = "steelblue", alpha = .75, scale = 1.2, rel_min_height = 0.05) + 
+  xlab("width (m)") + ylab("") + theme(axis.text=element_text(size=13), 
+        axis.title=element_text(size=14))
+ggsave("figures/Fig1B_ridgeplot_widths.jpg",  width = 5, height = 9)
+ggsave("figures/Fig1B_ridgeplot_widths.tiff",  width = 5, height = 9)
+```
+
+
+### Posterior Distribution Examples
+Figure 3  
+Show example of an individual's posterior predictive distributions for TL, SW, SWstd, SA, BAI, and BV
+```{r}
+# select individual blue whale to show example of posterior distributions
+ex_output <- indv_df$`BW180829-30`
+
+
+exTL <- ggplot(ex_output, aes((TL))) + 
+  stat_halfeye(fill = "steelblue", alpha = 0.75) + 
+  xlab("predicted TL (m)") + 
+  ylab("density") + 
+    ggtitle("Total length") + 
+  theme(plot.title = element_text(size = 10))
+
+exSW <- ggplot(ex_output, aes(TL.55.00..Width)) + 
+  stat_halfeye(fill = "steelblue", alpha = 0.75) + 
+  xlab("predicted SW (m)") + 
+  ylab("density") + 
+    ggtitle("1D: SW") + 
+  theme(plot.title = element_text(size = 10))
+
+exSWstd <- ggplot(ex_output, aes(SW)) + # note that "SW" here was calculated in CollatriX and is already standardized 
+  stat_halfeye(fill = "steelblue", alpha = 0.75) + 
+  xlab("predicted SWstd") + 
+  ylab("density") + 
+    ggtitle("1D: SWstd") + 
+  theme(plot.title = element_text(size = 10))
+
+exSA <- ggplot(ex_output, aes(SA_HT)) + 
+  stat_halfeye(fill = "steelblue", alpha = 0.75) + 
+  xlab("predicted SA (m2)") + 
+  ylab("density") + 
+    ggtitle("2D: Surface Area") + 
+  theme(plot.title = element_text(size = 10))
+
+exBAI <- ggplot(ex_output, aes(BAIpar_HT)) + 
+  stat_halfeye(fill = "steelblue", alpha = 0.75) + 
+  xlab("predicted BAI") +
+  ylab("density") + 
+    ggtitle("2D: BAI") + 
+  theme(plot.title = element_text(size = 10))
+
+exBV <- ggplot(ex_output, aes(BV_HT)) + 
+  stat_halfeye(fill = "steelblue", alpha = 0.75) + 
+  xlab("predicted BV (m3)") + 
+  ylab("density") + 
+    ggtitle("3D: Body Volume") + 
+  theme(plot.title = element_text(size = 10))
+
+
+ggarrange(exTL, exSW, exSWstd, exSA, exBAI, exBV)
+ggsave("figures/Fig3_posteriors.jpg", width = 180, units = "mm")  
+ggsave("figures/Fig3_posteriors.tiff", width = 180, units = "mm")  
+
+```
+
+
+### Body condition estimates in 1d, 2d, and 3d.
+Figure 4  
+SW, SA, BV, SWstd, BAI
+```{r}
+# SW
+sw_plot <- ggplot(data = bc_dat, aes(x=TL.mean, y = SW, ymin = SW_lwr, ymax = SW_upr, color = group)) +
+  geom_pointrange(fill = "grey70") +
+  theme(legend.position = "none") + 
+  ylab("Single Width (m)") + xlab("TL (m)") + 
+  scale_colour_manual(values = specColors) +
+  ggtitle("1D: SW") 
+
+# FDSA using HT
+HT_fdsa <- ggplot(data = bc_dat, aes(x=TL.mean, y = SA.HT.mean , ymin = SA.HT.lower, ymax = SA.HT.upper, color = group)) +
+  geom_pointrange(fill = "grey70") +
+  theme(legend.position = "none") + 
+  ylab("SA (m2)") + 
+  xlab("TL (m)") + 
+  scale_colour_manual(values = specColors) +
+  ggtitle("2D: SA") 
+
+# BV using HT
+HT_bv1 <- ggplot(data = bc_dat, aes(x=TL.mean, y = BV.HT.mean, ymin = BV.HT.lower, ymax = BV.HT.upper, color = group)) +
+  geom_pointrange(fill = "grey70") +
+  theme(legend.position = "none") + 
+  ylab(" BV (m3)") + 
+  #scale_y_continuous(limits = c(-.5, .5)) +
+  scale_colour_manual(values = specColors) +
+  xlab("TL (m)") + 
+  ggtitle("3D: BV") 
+
+# BAI 
+bai <- ggplot(data = bc_dat, aes(x=TL.mean, y = BAIpar.HT.mean, ymin = BAIpar.HT.lower, ymax = BAIpar.HT.upper, color = group)) +
+  geom_pointrange(fill = "grey70") +
+  theme(legend.position = "none") + 
+  ylab("BAI") + 
+  scale_colour_manual(values = specColors) +
+  xlab("TL (m)") +
+  ggtitle("2D: BAI") 
+
+
+std_SW2 <- ggplot(data = bc_dat, 
+                  aes(x=TL.mean, y = SW_std, ymin = SW_std_lwr, ymax = SW_std_upr, color = group)) +
+  geom_pointrange(fill = "grey70") +
+  #theme(legend.position = "none") + 
+  ylab("SW standardized") + xlab("TL (m)") + 
+  ylim(0, 0.4) +
+  scale_colour_manual(values = specColors) +
+  ggtitle("1D: SWstd") + 
+  theme(legend.position = "none")
+
+
+# Legend
+leg_std <- ggplot(data = bc_dat, aes(x = TL.mean, y = SW, color = group)) +
+  geom_point() +
+  lims(x = c(0,0), y = c(0,0))+
+  theme_void()+
+  theme(legend.position = c(0.4,0.5),
+        legend.key.size = unit(0.5, "cm"),
+        legend.text = element_text(size =  8),
+        legend.title = element_blank()) + #, face = "regular"))+
+    scale_colour_manual(values = specColors) +
+  guides(colour = guide_legend(override.aes = list(size=4.5)))
+
+
+ggarrange(sw_plot, HT_fdsa, HT_bv1, std_SW2, bai, leg_std) 
+ggsave("figures/Fig4_BC_estimates.jpg", width = 10, height = 7)
+ggsave("figures/Fig4_BC_estimates.tiff", width = 10, height = 7)
+```
+
+
+### How does uncerainty scale across 1D, 2D, and 3D
+Figure 5    
+Use the standard deviation of each body condition metric's posterior predictive distribution
+```{r}
+# create condensed dataframe
+bc_scale <- bc_dat %>% select(AID, Species, group, SW_sd, SA.sd, BV.sd, TL.sd)
+
+# SA ~ SW
+mod.scale.sa <- lm(data = bc_scale, log(SA.sd) ~ log(SW_sd))
+summary(mod.scale.sa)           # slope = 1.45
+round(confint(mod.scale.sa),2)  # CI: [1.20   1.69]
+
+
+# BV ~ SW
+mod.scale.bv <- lm(data = bc_scale, log(BV.sd) ~ log(SW_sd))
+summary(mod.scale.bv)           # slope = 1.76 ---slope = 2.14
+mod.scale.bv$coefficients
+round(confint(mod.scale.bv),2)  #CI:  [1.39   2.13]
+
+
+s <- ggplot(data = bc_scale, aes(x = log(SW_sd), y = log(SA.sd), color = group)) +
+  geom_point() + ylab("log(SA uncertainty)") + xlab("log (SW uncertainty)") + 
+  #geom_smooth(method = 'lm') + 
+  ylim(-2, 2) + 
+  ggtitle("1D vs. 2D") + scale_colour_manual(values = specColors) + 
+   theme(legend.position = c(0.2,0.85),
+        legend.key.size = unit(0.5, "cm"),
+        legend.text = element_text(size =  8),
+        legend.title = element_blank()) +
+  #geom_smooth(method = 'lm') + 
+  geom_abline(intercept = mod.scale.sa$coefficients[1], slope = mod.scale.sa$coefficients[2])
+
+b <- ggplot(data = bc_scale, aes(x = log(SW_sd), y = log(BV.sd), color = group)) +
+  geom_point() + ylab("log(BV uncertainty)") + xlab("log (SW uncertainty)") + 
+  ylim(-2, 2) + 
+  ggtitle("1D vs. 3D") + scale_colour_manual(values = specColors) + theme(legend.position = "none") + 
+  #geom_smooth(method = 'lm') + 
+  geom_abline(intercept = mod.scale.bv$coefficients[1], slope = mod.scale.bv$coefficients[2])
+
+ggarrange(s, b)
+ggsave("figures/Fig5_scaling_of_uncertainty.jpg", width = 180, units = "mm")
+ggsave("figures/Fig5_scaling_of_uncertainty.tiff", width = 180, units = "mm")
+```
+
+Uncertainty in SA and BV both increase proportionally larger than uncertainty associated with single measurements, though BV increases at a greater rate than SA.
+
+
+
+### Calculate body condition index (BCI) for SA and BV
+```{r}
+
+#
+## model BCI:  HT FDSA uncertainty
+#
+
+# HT.mean 
+mod.bci.HT.SA <- lm(log(SA.HT.mean) ~ log(TL.mean)*group, data = bc_dat)
+summary(mod.bci.HT.SA)
+bc_dat$res_SA_HT <- mod.bci.HT.SA$residuals 
+
+# lower bound
+mod.bci.HT.SA.lwr <- lm(log(SA.HT.lower) ~ log(TL.mean)*group, data = bc_dat)
+summary(mod.bci.HT.SA.lwr)
+bc_dat$res_SA_HT_lwr <- mod.bci.HT.SA.lwr$residuals 
+
+# upper bound
+mod.bci.HT.SA.upr <- lm(log(SA.HT.upper) ~ log(TL.mean)*group, data = bc_dat)
+summary(mod.bci.HT.SA.upr)
+bc_dat$res_SA_HT_upr <- mod.bci.HT.SA.upr$residuals 
+
+
+#
+## model BCI:  HT BV uncertainty
+#
+
+# model BCI HT Uncertainty
+mod.bci.HT.BV <- lm(log(BV.HT.mean) ~ log(TL.mean)*group, data = bc_dat)
+summary(mod.bci.HT.BV)
+bc_dat$res_BV_HT <- mod.bci.HT.BV$residuals 
+
+# lower bound
+mod.bci.HT.BV.lwr <- lm(log(BV.HT.lower) ~ log(TL.mean)*group, data = bc_dat)
+summary(mod.bci.HT.BV.lwr)
+bc_dat$res_BV_HT_lwr <- mod.bci.HT.BV.lwr$residuals 
+
+# upper bound
+mod.bci.HT.BV.upr <- lm(log(BV.HT.upper) ~ log(TL.mean)*group, data = bc_dat)
+summary(mod.bci.HT.BV.upr)
+bc_dat$res_BV_HT_upr <- mod.bci.HT.BV.upr$residuals 
+```
+
+
+
+#### Summary
+for Table 2.
+```{r}
+metric_tab <- bc_dat %>% group_by(group) %>% summarise(TL.pop.mean = mean(TL.mean),
+                                                       TL.pop.sd = sd(TL.mean),
+                                                       #TL.range = mean(TL.upper - TL.lower),
+                                                       TL.lwr.mean = min(TL.mean),
+                                                       TL.upr.mean = max(TL.mean),
+                                                       
+                                                       SW.mean = mean(SW),
+                                         SW.pop.sd = sd(SW),
+                                        # SW.range = mean(SW_upr - SW_lwr),
+                                         SW.lwr.mean = min(SW_lwr),
+                                         SW.upr.mean = max(SW_upr),
+                                         
+                                         
+                                         SWstd.mean = mean(SW_std),
+                                         SWstd.pop.sd = sd(SW_std),
+                                         #SWstd.range = mean(SW_std_upr - SW_std_lwr),
+                                         SWstd.lwr.mean = min(SW_std),
+                                         SWstd.upr.mean = mean(SW_std),
+                                         
+                                         SA.mean = mean(SA.HT.mean),
+                                         SA.pop.sd = sd(SA.HT.mean),
+                                         #SA.range = mean(SA.HT.upper - SA.HT.lower),
+                                         SA.lwr.mean = min(SA.HT.mean),
+                                         SA.upr.mean = max(SA.HT.mean),
+                                         
+                                         BV.mean = mean(BV.HT.mean),
+                                         BV.pop.sd = sd(BV.HT.mean),
+                                         #BV.range = mean(BV.HT.upper - BV.HT.lower),
+                                         BV.lwr.mean = min(BV.HT.mean),
+                                         BV.upr.mean = max(BV.HT.mean),
+                                         
+                                         BAI.mean = mean(BAIpar.HT.mean),
+                                         BAI.pop.sd = sd(BAIpar.HT.mean),
+                                         #BAI.range = mean(BAIpar.HT.upper - BAIpar.HT.lower),
+                                         BAI.lwr.mean = min(BAIpar.HT.mean),
+                                         BAI.upr.mean = max(BAIpar.HT.mean)) 
+
+
+# For Table 2.
+metric_tab
+```
+
+
+### Within-metric Precision
+Figure 6  
+Compare precision across body condition measurements using coefficient of variation (CV%).
+The CV% statistic is a simple and widely-used standardized measure of the spread of a set of measurements of a sample. It is a useful value because it allows direct comparison of the variation in samples measured with different units, or with very different means. The CV% is sometimes preferred to the standard deviation because the value of the coefficient of variation is independent of the unit of measurement scale (as long as it is a ratio scale). 
+```{r}
+
+# CV% for each metric
+cv_dat <- bc_dat %>% mutate(SW = (SW_sd/SW)*100,
+                            SWstd = (SW_std_sd/SW_std)*100, 
+                            BAI = (BAI.sd/BAIpar.HT.mean)*100,
+                            SA = (SA.sd/SA.HT.mean)*100,
+                            BV = (BV.sd/BV.HT.mean)*100) %>% select(AID, Species, SW, SWstd, BAI, SA, BV)
+
+cv_piv <- cv_dat  %>% select(names(cv_dat)[3:7],'AID','Species') %>% pivot_longer(., cols = names(cv_dat)[3:7], names_to = "Method", values_to = "cv") 
+
+#cv_piv$Method <- factor(cv_piv$Method, ordered = FALSE)
+cv_piv$Method <- ordered(cv_piv$Method, levels = c("SW", "SWstd", "BAI", "SA", "BV"))
+
+ggplot(data = cv_piv, aes(x = Method, y = cv)) + geom_boxplot() + ylab("CV %") + xlab("")    
+ggsave("figures/Fig6_CVs.jpg", width = 85, units = "mm")
+ggsave("figures/Fig6_CVs.tiff", width = 85, units = "mm")
+
+# CV% summary table (Table 3)
+cv_piv %>% group_by(Method) %>% summarize(mean = round(mean(cv),2),
+                                          min = round(min(cv),2),
+                                          max = round(max(cv),2),
+                                          sd = round(sd(cv), 2))
+
+# CV% by species 
+ggplot(data = cv_piv, aes(x = Method, y = cv, color = Species)) + geom_boxplot() + ylab("CV %") + xlab("") 
+```
+
+
+
+
+### Correlation matrix
+for Figure 7  
+Comparison of standardized body condition measurements  
+
+#### A) Correlelogram
+```{r}
+# Helpful links
+    # http://www.sthda.com/english/wiki/correlation-matrix-a-quick-start-guide-to-analyze-format-and-visualize-a-correlation-matrix-using-r-software
+    # http://www.sthda.com/english/wiki/visualize-correlation-matrix-using-correlogram
+
+
+# Pearson correlation (r), which measures a linear dependence between two variables (x and y). 
+# covariance measures the direction of the linear relationship between two variables.
+# correlation measures the strength and direction of the linear relationship
+
+#
+# standardized body condition measurement
+#
+# blue whales
+dat.blue <- bc_dat %>% dplyr::filter(Species == "Blue") %>% select(c(SW_std, BAIpar.HT.mean, res_SA_HT, res_BV_HT))
+names(dat.blue) <- c("SWstd", "BAI", "SA_BCI", "BV_BCI")
+res.blue <- cor(dat.blue)
+round(res.blue,2)
+
+# humpback whales
+  # adults
+dat.hump <- bc_dat %>% dplyr::filter(Species == "Humpback" & Reproductive_Class != "calf") %>% select(c(SW_std, BAIpar.HT.mean, res_SA_HT, res_BV_HT))
+names(dat.hump) <- c("SWstd", "BAI", "SA_BCI", "BV_BCI")
+res.hump <- cor(dat.hump)
+round(res.hump,2)
+  # calves
+dat.hump.calf <- bc_dat %>% dplyr::filter(Species == "Humpback" & Reproductive_Class == "calf") %>% select(c(SW_std, BAIpar.HT.mean, res_SA_HT, res_BV_HT))
+names(dat.hump.calf) <- c("SWstd", "BAI", "SA_BCI", "BV_BCI")
+res.hump.calf <- cor(dat.hump.calf)
+round(res.hump.calf,2)
+
+# minke whales
+dat.minke <- bc_dat %>% dplyr::filter(Species == "AMW") %>% select(c(SW_std, BAIpar.HT.mean, res_SA_HT, res_BV_HT))
+names(dat.minke) <- c("SWstd", "BAI", "SA_BCI", "BV_BCI")
+res.minke <- cor(dat.minke)
+round(res.minke,2)
+
+#
+# Correlation matrix (correlogram) w/ p-value
+#
+#  blue colors = positively correlated, red colors = negatively correlated
+
+pdf(file="figures/Fig7A_correlation_matrix.pdf")
+par(mfrow=c(2,2))
+
+corrplot(res.minke, method="number", type = "upper", #order = "hclust", 
+         tl.col = "black", tl.srt = 45, diag=FALSE, title = "Antarctic Minkes", mar=c(0,0,1,0))
+
+corrplot(res.blue, method="number", type = "upper", #order = "hclust", 
+         tl.col = "black", tl.srt = 45, diag=FALSE, title = "Blues", mar=c(0,0,1,0))
+
+corrplot(res.hump, method="number", type = "upper", #order = "hclust", 
+         tl.col = "black", tl.srt = 45, diag=FALSE, title = "Humpbacks", mar=c(0,0,1,0))
+
+corrplot(res.hump.calf, method="number", type = "upper", #order = "hclust", 
+         tl.col = "black", tl.srt = 45, diag=FALSE, title = "Humpback calves", mar=c(0,0,1,0))
+dev.off()
+```
+
+
+#### B) Regression 
+```{r}
+cor1 <- ggplot(data = bc_dat, aes(x = BAIpar.HT.mean, y = SW_std, color = group)) + geom_point() + 
+  geom_smooth(method = 'lm') + scale_colour_manual(values = specColors) +
+  xlab("BAI") + ylab("standardized SW") + theme(legend.position = "none")
+
+cor2 <- ggplot(data = bc_dat, aes(x = BAIpar.HT.mean, y = res_SA_HT, color = group)) + geom_point() + 
+  geom_smooth(method = 'lm')  + scale_colour_manual(values = specColors) +
+  xlab("BAI") + ylab("BCI: SA") + theme(legend.position = "none")
+
+co3 <- ggplot(data = bc_dat, aes(x = BAIpar.HT.mean, y = res_BV_HT, color = group)) + geom_point() + 
+  geom_smooth(method = 'lm') +   scale_colour_manual(values = specColors) +
+  xlab("BAI") + ylab("BCI: BV") + theme(legend.position = "none")
+
+ggarrange(cor1,cor2,co3, leg_std)
+ggsave("figures/Fig7B_correlations.jpg", width = 7, height = 7) 
+```
+
+
+
