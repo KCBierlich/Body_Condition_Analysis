@@ -133,7 +133,7 @@ knitr::kable(
 
 
 ## Data
-Data located in 1_uncertainty_model > data  
+Data located in data folder  
 
 _calibration_object-measurements.csv_ - training/calibration data for the LemHex-44 and FreeFly Alta 6.     
 Data from: Bierlich, K. C., Schick, R. S., Hewitt, J., Dale, J., Goldbogen, J. A., Friedlaender, A. S., & Johnston, D. W. (2020). Data and scripts from: A Bayesian approach for predicting photogrammetric uncertainty in morphometric measurements derived from UAS. Duke Research Data Repository. V2 https://doi.org/10.7924/r4sj1jj6s  
@@ -191,12 +191,12 @@ run 'make.R'
 This will generate an "output" folder that contains an 'mcmc' folder and a 'reports' folder.   
  
   * The 'mcmc' folder contains all the .rds outputs from the model.  
-      + "length_samples_mns.rds" contains the posterior predictive measurement distributions for TL and widths and is used to calculate  body condition in the "2_calculating_body_condition" folder. 
+      + "length_samples_mns.rds" contains the posterior predictive measurement distributions for TL and widths and is used to calculate  body condition in the "calculating_body_condition" folder. 
   
   * The 'reports' folder contains .html files to evaluate the results from the model  
       + See "posterior_diagnostics_mns.html" for a summary of model output for each measurement
 
-After model is finished running, proceed to 2_calculate_body condition      
+After model is finished running, proceed to calculate_body condition      
       
 
 # 2. Calculating body condition  
