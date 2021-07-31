@@ -21,17 +21,20 @@ val_length_samples.rds
 collated_allMC.rds
 collated_MC_summarystats.csv
 whales_merged.csv
-Fig1B_ridgeplot_widths.jpg
-Fig1B_ridgeplot_widths.tiff
-Fig2_body_shapes.jpg
-Fig2_body_shapes.tiff
-Fig3_posteriors.jpg
-Fig3_posteriors.tiff
-Fig4_BC_estimates.jpg
-Fig4_BC_estimates.tiff
-Fig5_scaling_of_uncertainty.jpg
-Fig5_scaling_of_uncertainty.tiff
-Fig6_CVs.jpg
-Fig6_CVs.tiff
-Fig7A_correlation_matrix.pdf
-Fig7B_correlations.jpg
+*jpg
+*tiff
+*pdf
+# Fig1B_ridgeplot_widths.jpg
+# Fig1B_ridgeplot_widths.tiff
+# Fig2_body_shapes.jpg
+# Fig2_body_shapes.tiff
+# Fig3_posteriors.jpg
+# Fig3_posteriors.tiff
+# Fig4_BC_estimates.jpg
+# Fig4_BC_estimates.tiff
+# Fig5_scaling_of_uncertainty.jpg
+# Fig5_scaling_of_uncertainty.tiff
+# Fig6_CVs.jpg
+# Fig6_CVs.tiff
+# Fig7A_correlation_matrix.pdf
+# Fig7B_correlations.jpg
