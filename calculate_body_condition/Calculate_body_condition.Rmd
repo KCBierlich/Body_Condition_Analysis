@@ -1,0 +1,244 @@
+---
+title: "Calculate_body_condition"
+author: "KCB"
+date: "7/28/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Calculating body condition using CollatriX
+
+This R markdown uses the outputs from the uncertainty model to calculate each multiple body condition measurements using CollatriX. 
+
+This document uses R and python. 
+
+HTRange refers to 'Head-Tail Range'
+
+###### For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+
+```{r load packages, include = FALSE}
+## Packages
+library(plyr)
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+library(ggpubr)
+library(reticulate)
+library(pivottabler)
+library(drake)
+library(coda)
+library(mcmc)
+library(stringr)
+library(conflicted) 
+conflict_prefer("mutate", "dplyr") 
+conflict_prefer("summarise", "dplyr") 
+
+
+# Set local directory for python
+use_python("/Macintosh HD/anaconda3/bin/python")
+```
+
+
+### Import data
+Prep data for CollatriX
+```{r}
+# import data used as input in model 
+uncorrected_mod_input <- read.csv(file.path("..", "data", "measurement_inputs.csv"))
+
+# Confirm column names to change (all the widths 5 - 95%)
+names(uncorrected_mod_input)[6:24]
+
+## Need to change headers 
+newNames_4py <-  c("TL-05.00% Width", "TL-10.00% Width",	"TL-15.00% Width",	"TL-20.00% Width",	"TL-25.00% Width",	"TL-30.00% Width",	"TL-35.00% Width",	"TL-40.00% Width",	"TL-45.00% Width",		"TL-50.00% Width",	"TL-55.00% Width",	"TL-60.00% Width",	"TL-65.00% Width",	"TL-70.00% Width",	"TL-75.00% Width",	"TL-80.00% Width",	"TL-85.00% Width",	"TL-90.00% Width", "TL-95.00% Width")
+names(uncorrected_mod_input)[6:24] <- newNames_4py
+
+# save output
+write.csv(uncorrected_mod_input, file.path("outputs", "whales_merged.csv"))
+# and bring it back in
+whales <- read.csv(file.path("outputs", "whales_merged.csv"), stringsAsFactors=F)
+
+```
+
+### Load RDS files
+```{r}
+# Import output from uncertainty model and save as variable
+lengths <- readRDS(file.path("..", "output", "mcmc", "length_samples_mns.rds"))  
+
+# now you can view each animal's mcmc output dataframe for TL and and each width with $'AID'.
+lengths[1]  # Example. Can also use double index "[[]]" 
+```
+
+
+# Run CollatriX via Python 
+CollatriX: https://github.com/cbirdferrer/collatrix#installation 
+
+If the following error is produced, “No model named ‘scipy’”, despite it listed as being installed above (Channel: conda-forge), then install scipy package in Anaconda directly (not terminal) in the "r-miniconda" and "r-reticulate" environments
+
+## source the python body condition functions
+```{r}
+source_python(file.path("whalebc_funcs_err_no_pymc3.py"), convert=FALSE)
+```
+
+```{python}
+# this little chunk just makes sure that running python works
+test = pd.DataFrame(data={"A":[1,2,3,4]})
+
+x = np.mean(test['A'])
+x   # should produce "2.5"
+```
+
+
+## calculate body condition on every indiviudal's MC dataframe
+```{python}
+
+#####WARNING: ONCE YOU'VE RUN THIS, DON'T RUN AGAIN, IT WILL START OVERWRITING THE BIG DATAFRAMES#################
+
+dr = r.whales #read in dataframe containing individuals and ranges etc.
+dl = r.lengths #read in dictionary of dataframes per individual from RDS
+
+IDS = list(dl.keys()) #make list of IDs, this what the loop will use
+df_dicts = dict.fromkeys(IDS) #make an empty dictionary with just the keys for each ID to fill with the full dataframe per individual
+df_short = pd.DataFrame(data={}) #make emtpy dataframe to fill with the summary stats
+for i in IDS: #loop through the IDs
+  #pull dataframe for that individual from the dataframe, reset index so index col can be used for group by in collatrix
+  li_all = dl[i].reset_index() 
+  li = li_all[50000:] #burn the first half of the mcmc iterations. remember python uses 0-based indexing
+  row = dr.loc[dr['AID'] == i] #pull row from whales dataframe containing range info for the individual being analyzed in the loop
+  ##HEAD TO TOE (HT)
+  HT_R = row['HTRange'].tolist()[0].replace("%","").split("-") #get values for range to be inputted in the function
+  htL = int(HT_R[0]); htU = int(HT_R[1]) #format values to be lower and upper bound inputs in the function
+  baiHT = bai_parabola(li,"TL",5,htL,htU,"HT") #run bai parabola, outputs both large/full dataframe and summ stats df
+  bvHT = body_vol(li,"TL",5,htL,htU,"HT") #run body vol, outputs two dfs - large and summ stats
+  ##SHORT RANGE (SR)
+  SH_R = row['SHrange'].tolist()[0].replace("%","").split("-") #see comments for HEAD TO Tail (HT)
+  srL = int(SH_R[0]); srU = int(SH_R[1])
+  baiSR = bai_parabola(li, "TL",5,srL,srU,"SR")
+  bvSR = body_vol(li, "TL",5,srL,srU,"SR")
+  ##20-60 (2060)
+  bai20 = bai_parabola(li,"TL",5,20,60,"2060")
+  bv20 = body_vol(li,"TL",5,20,60,"2060")
+  ##SINGLE WIDTH (SW) - add column to dataframe that's the width/TL
+  w = row['SW'].tolist()[0].replace("%","") #pull row for this individual
+  sw_name = "TL.{0}.00..Width".format(str(w)) #get name of column for the width for this individual
+  li['SW'] = li[sw_name]/li["TL"] #calculate standardized short width for this individual
+
+  ## MERGE
+  ##merge/set up dictionary of dataframes
+  #make list of dataframes to merge
+  df_list = [li,baiHT,bvHT,baiSR,bvSR,bai20,bv20] #for the full dataframe (1000 rows)
+  #merge the long dataframe (all 1000 rows)
+  df_large = reduce(lambda left,right: pd.merge(left,right,on='index'), df_list) #merge all dfs at oence
+  df_large['AID'] = i #add AID column
+  #add dataframe to dictionary
+  df_dicts[i] = df_large #add this dictionary to the one set up outside the loop, add this df to the key for this indvidual
+  
+  # break #this break stops the loop after one loop, useful for testing, to run the whole thing, remove this line
+
+#quick check of df in dictionary for AID = BW180829-30
+print(df_dicts['BW180829-30'])
+```
+
+
+```{python}
+df_dicts['BW180829-30'].columns #check columns of full dataframe
+df_dicts['BW180829-30']['SW'] #this is the column of the SWstd
+```
+
+
+## convert the dictionary of dataframes to a named list in R and save as an RDS
+```{r}
+#pull dictionary in and convert to named list and output as RDS file
+IDlist <- py$IDS #pull list of IDs in
+for.rds <- c() #make emtpy list that will become named list
+
+#loop through the IDs
+for (x in 1:length(IDlist)){
+  xx <- IDlist[x]
+  temp.df <- py_to_r(py$df_dicts[[xx]]) #convert dataframe from dictionary to r dataframe
+  temp <- list(temp.df) #make a list containing the dataframe for the one individual
+  names(temp)[1] <- IDlist[x]  #name the item in the list with the ID
+  for.rds <- c(for.rds,temp) #add this named list to the big empty list (that we're filling)
+}
+
+length(for.rds) #check that the named list is the right length (should be the number of individuals, n = 127)
+
+saveRDS(for.rds, file.path("outputs", "collated_allMC.rds")) #save big named list as RDS
+```
+
+
+
+```{r}
+#check that the rds can be read back
+fulldf <- readRDS(file.path("outputs", "collated_allMC.rds"))
+head(fulldf)
+```
+
+
+## Calculate summary statstics from RDS  
+Columns to summarize: TL, SW, BAIpar_HT, SA_HT, BV_HT, BAIpar_SR, SA_SR, BV_SR, BAIpar_2060, SA_2060, BV_2060.  
+
+**Key**:    
+TL = total length   
+SW = standardized single width   
+BAIpar = body area index (BAI)  
+SA = project dorsal surface area  
+BV = body volume  
+  
+Suffixes:  
+HT = Head-Tail Range  
+SR = short range -- not included in analysis 
+2060 = generic fixed width range 20-60% -- not included in analysis
+
+```{r}
+#make list of names of columns for summary stats table
+summcols.names <- c("TL","SW","BAIpar.HT","SA.HT","BV.HT","BAIpar.SR","SA.SR","BV.SR","BAIpar.2060","SA.2060","BV.2060")
+#make list of the body condition column names from the RDS dataframes
+bc.col.names <- gsub("\\.","_",summcols.names)
+
+#make an empty dataframe to fill with the summary stats rows
+summstats.df <- data.frame()
+
+#make a function that calculates the HPD interval and mean of each summary stats column, then adds those values to dataframe
+HPDfunc <- function(subdf,tempdf,scol,cname){
+  hpd = HPDinterval(mcmc(subdf[[scol]])) #calculate HPD interval of column
+  tempdf[[paste(cname,".mean",sep="")]] <- mean(subdf[[scol]]) #calculate mean and add column with mean of that body cond column
+  tempdf[[paste(cname,".lower",sep="")]] <- hpd[1] #add column for HPD lower bound value for that body cond column
+  tempdf[[paste(cname,".upper",sep="")]] <- hpd[2] #add columns for HPD upper bound value for that body cond column
+  return(tempdf) #return dataframe with those 3 columns
+}
+
+#loops through list of IDs (loop through each individual's data frame)
+for (x in 1:length(IDlist)){
+  xx <- IDlist[x] #pull ID name from list
+  AID <- xx #save ID as variable
+  tempdf <- data.frame(AID) #make empty dataframe with one column containing animal ID, the HPD func will add to this df
+  subdf <- fulldf[[xx]] #pull that dataframe of the individual from the named list of dataframes 
+  #now we'll loop through the names of the columns we need summary stats for
+  for (y in 1:length(summcols.names)){
+    scol <- bc.col.names[y] #pull the name of the body condition column
+    cname <- summcols.names[y] #pull the name of the column formatted to become the name of the summary stats header
+    tempdf <- HPDfunc(subdf,tempdf,scol,cname) #run the HPD function on that column
+  }
+  summstats.df <- rbind(summstats.df,tempdf) #add the row of summary stats for this individual to the main dataframe
+}
+
+print(summstats.df)
+```
+
+
+### save CollatriX summary dataframe
+```{r}
+# this file contains the mean and 95% HPD intervals for the posterior predictive distribution of each body condition metric for each individual
+write.csv(summstats.df, file.path("outputs", "collated_MC_summarystats.csv"))
+```
+
+Now ready for analysis! Run 'Body_condition_analysis.Rmd' in the "body_condition_analysis" folder. 
