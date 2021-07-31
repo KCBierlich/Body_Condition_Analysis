@@ -17,9 +17,6 @@ This document uses R and python.
 
 HTRange refers to 'Head-Tail Range'
 
-###### For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-
 ```{r setup, include = FALSE}
 knitr::opts_chunk$set(echo = FALSE)
 ```
