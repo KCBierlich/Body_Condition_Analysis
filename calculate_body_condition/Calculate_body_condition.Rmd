@@ -41,7 +41,8 @@ conflict_prefer("summarise", "dplyr")
 
 
 # Set local directory for python
-use_python("/Macintosh HD/anaconda3/bin/python")
+#use_python("/Macintosh HD/anaconda3/bin/python")
+use_python("/Users/clarabird/opt/anaconda3/bin/python",require=TRUE)
 ```
 
 
@@ -82,7 +83,7 @@ If the following error is produced, “No model named ‘scipy’”, despite it
 
 ## source the python body condition functions
 ```{r}
-source_python(file.path("whalebc_funcs_err_no_pymc3.py"), convert=FALSE)
+source_python(file.path("whalebc_funcs_uncertainty.py"), convert=FALSE)
 ```
 
 ```{python}
@@ -103,51 +104,52 @@ dr = r.whales #read in dataframe containing individuals and ranges etc.
 dl = r.lengths #read in dictionary of dataframes per individual from RDS
 
 IDS = list(dl.keys()) #make list of IDs, this what the loop will use
-df_dicts = dict.fromkeys(IDS) #make an empty dictionary with just the keys for each ID to fill with the full dataframe per individual
+
+#we want to burn 1/2 of mcmc iterations, this makes it a parameter that changes based on the number of iterations run
+burn_num = int(len(dl[IDS[0]])/2 )
+
+#df_dicts = dict.fromkeys(IDS) #make an empty dictionary with just the keys for each ID to fill with the full dataframe per individual
 df_short = pd.DataFrame(data={}) #make emtpy dataframe to fill with the summary stats
+
+#IDS_test = IDS[0:2]
+df_dicts = dict.fromkeys(IDS)
+
 for i in IDS: #loop through the IDs
   #pull dataframe for that individual from the dataframe, reset index so index col can be used for group by in collatrix
-  li_all = dl[i].reset_index() 
-  li = li_all[50000:] #burn the first half of the mcmc iterations. remember python uses 0-based indexing
+  li_all = dl[i].reset_index()
+  li = li_all[burn_num:] #burn the first half of the mcmc iterations. remember python uses 0-based indexing
   row = dr.loc[dr['AID'] == i] #pull row from whales dataframe containing range info for the individual being analyzed in the loop
+  
   ##HEAD TO TOE (HT)
   HT_R = row['HTRange'].tolist()[0].replace("%","").split("-") #get values for range to be inputted in the function
   htL = int(HT_R[0]); htU = int(HT_R[1]) #format values to be lower and upper bound inputs in the function
   baiHT = bai_parabola(li,"TL",5,htL,htU,"HT") #run bai parabola, outputs both large/full dataframe and summ stats df
   bvHT = body_vol(li,"TL",5,htL,htU,"HT") #run body vol, outputs two dfs - large and summ stats
-  ##SHORT RANGE (SR)
-  SH_R = row['SHrange'].tolist()[0].replace("%","").split("-") #see comments for HEAD TO Tail (HT)
-  srL = int(SH_R[0]); srU = int(SH_R[1])
-  baiSR = bai_parabola(li, "TL",5,srL,srU,"SR")
-  bvSR = body_vol(li, "TL",5,srL,srU,"SR")
-  ##20-60 (2060)
-  bai20 = bai_parabola(li,"TL",5,20,60,"2060")
-  bv20 = body_vol(li,"TL",5,20,60,"2060")
+  
   ##SINGLE WIDTH (SW) - add column to dataframe that's the width/TL
   w = row['SW'].tolist()[0].replace("%","") #pull row for this individual
   sw_name = "TL.{0}.00..Width".format(str(w)) #get name of column for the width for this individual
-  li['SW'] = li[sw_name]/li["TL"] #calculate standardized short width for this individual
-
+  li['SWstd'] = li[sw_name]/li["TL"] #calculate standardized short width for this individual
+  
   ## MERGE
   ##merge/set up dictionary of dataframes
   #make list of dataframes to merge
-  df_list = [li,baiHT,bvHT,baiSR,bvSR,bai20,bv20] #for the full dataframe (1000 rows)
+  df_list = [li,baiHT,bvHT] #for the full dataframe
   #merge the long dataframe (all 1000 rows)
   df_large = reduce(lambda left,right: pd.merge(left,right,on='index'), df_list) #merge all dfs at oence
   df_large['AID'] = i #add AID column
   #add dataframe to dictionary
   df_dicts[i] = df_large #add this dictionary to the one set up outside the loop, add this df to the key for this indvidual
-  
-  # break #this break stops the loop after one loop, useful for testing, to run the whole thing, remove this line
 
-#quick check of df in dictionary for AID = BW180829-30
-print(df_dicts['BW180829-30'])
+#quick check of df in dictionary for first AID in list
+print("end of loop")
+print(df_dicts[IDS[0]])
 ```
 
 
 ```{python}
 df_dicts['BW180829-30'].columns #check columns of full dataframe
-df_dicts['BW180829-30']['SW'] #this is the column of the SWstd
+df_dicts['BW180829-30']['SWstd'] #this is the column of the SWstd
 ```
 
 
@@ -168,14 +170,14 @@ for (x in 1:length(IDlist)){
 
 length(for.rds) #check that the named list is the right length (should be the number of individuals, n = 127)
 
-saveRDS(for.rds, file.path("outputs", "collated_allMC.rds")) #save big named list as RDS
+saveRDS(for.rds, file.path("outputs", "collated_all_iter.rds")) #save big named list as RDS
 ```
 
 
 
 ```{r}
 #check that the rds can be read back
-fulldf <- readRDS(file.path("outputs", "collated_allMC.rds"))
+fulldf <- readRDS(file.path("outputs", "collated_all_iter.rds"))
 head(fulldf)
 ```
 
@@ -191,13 +193,11 @@ SA = project dorsal surface area
 BV = body volume  
   
 Suffixes:  
-HT = Head-Tail Range  
-SR = short range -- not included in analysis 
-2060 = generic fixed width range 20-60% -- not included in analysis
+HT = Head-Tail Range
 
 ```{r}
 #make list of names of columns for summary stats table
-summcols.names <- c("TL","SW","BAIpar.HT","SA.HT","BV.HT","BAIpar.SR","SA.SR","BV.SR","BAIpar.2060","SA.2060","BV.2060")
+summcols.names <- c("TL","SWstd","BAIpar.HT","SA.HT","BV.HT")
 #make list of the body condition column names from the RDS dataframes
 bc.col.names <- gsub("\\.","_",summcols.names)
 
