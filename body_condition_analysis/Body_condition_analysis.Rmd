@@ -36,7 +36,7 @@ conflict_prefer("summarize", "dplyr")
 ## Import / prep data 
 ```{r}
 # load each animal's dataframe, posterior distribution (the mcmc iterations)
-indv_df <- readRDS(file.path("..","calculate_body_condition", "outputs", "collated_allMC.rds"))
+indv_df <- readRDS(file.path("..","calculate_body_condition", "outputs", "collated_all_iter.rds"))
 
 
 # CollatriX summary sheet with the mean and 95% HPD intervals for the posterior predictive distribution of each body condition metric for each individual
@@ -53,7 +53,7 @@ df.summary_meta <- df.summary %>% left_join(indv_meta, by = "AID") %>%
   TL.25.00..Width, TL.30.00..Width, TL.35.00..Width, TL.40.00..Width, TL.45.00..Width, TL.50.00..Width,
   TL.55.00..Width, TL.60.00..Width, TL.65.00..Width, TL.70.00..Width, TL.75.00..Width, TL.80.00..Width,
   TL.85.00..Width, TL.90.00..Width, TL.95.00..Width, HTRange, SW, BaroAlt, Launch_Ht, LaserAlt, Altitude, 
-  Focal_Length, Iw, Sw, date_source, Reproductive_Class, TL.mean, TL.lower, TL.upper, SW.mean, SW.lower, SW.upper, BAIpar.HT.mean,
+  Focal_Length, Iw, Sw, date_source, Reproductive_Class, TL.mean, TL.lower, TL.upper, SWstd.mean, SWstd.lower, SWstd.upper, BAIpar.HT.mean,
   BAIpar.HT.lower, BAIpar.HT.upper, SA.HT.mean, SA.HT.lower, SA.HT.upper, BV.HT.mean, BV.HT.lower, BV.HT.upper)
 # Note that 'TL' is the original/expected/empirical/pre-model length, where 'TL.mean' is the mean of the predicted posterior distribution from the model. Same for the widths.
 
@@ -314,7 +314,7 @@ exSW <- ggplot(ex_output, aes(TL.55.00..Width)) +
     ggtitle("1D: SW") + 
   theme(plot.title = element_text(size = 10))
 
-exSWstd <- ggplot(ex_output, aes(SW)) + # note that "SW" here was calculated in CollatriX and is already standardized 
+exSWstd <- ggplot(ex_output, aes(SWstd)) + # note that "SW" here was calculated in CollatriX and is already standardized 
   stat_halfeye(fill = "steelblue", alpha = 0.75) + 
   xlab("predicted SWstd") + 
   ylab("density") + 
