@@ -18,8 +18,10 @@ predictive distributions for each measurement).
 
 # 1\. Running the uncertainty model
 
-Uncertainty model from:
-<https://github.com/KCBierlich/Uncertainty_Model>
+Uncertainty model from:  
+<https://github.com/KCBierlich/Uncertainty_Model>.   
+Bierlich KC, Schick RS, Hewitt J, Dale J, Goldbogen JA, Friedlaender AS, Johnston DW (2021) Bayesian approach for predicting photogrammetric uncertainty in morphometric measurements derived from drones. Mar Ecol Prog Ser 673:193-210. https://doi.org/10.3354/meps13814 
+
 
 The code is designed to be run using the `drake` package, by running the
 code in the script [make.R](make.R) either via the command line (i.e.,
