@@ -18,8 +18,7 @@ predictive distributions for each measurement).
 
 # 1\. Running the uncertainty model
 
-Uncertainty model from:  
-<https://github.com/KCBierlich/Uncertainty_Model>.   
+Uncertainty model <https://github.com/KCBierlich/Uncertainty_Model>.   
 Bierlich KC, Schick RS, Hewitt J, Dale J, Goldbogen JA, Friedlaender AS, Johnston DW (2021) Bayesian approach for predicting photogrammetric uncertainty in morphometric measurements derived from drones. Mar Ecol Prog Ser 673:193-210. https://doi.org/10.3354/meps13814 
 
 
